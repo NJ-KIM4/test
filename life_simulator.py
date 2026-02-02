@@ -1,269 +1,190 @@
 #!/usr/bin/env python3
-"""Upgraded life simulator with richer GUI and visuals."""
+"""Action RPG mini game with drops and equipment."""
 
 from __future__ import annotations
 
 import random
 import tkinter as tk
-from dataclasses import dataclass
-from tkinter import messagebox, ttk
-from typing import Callable
+from dataclasses import dataclass, field
+from tkinter import ttk
 
 
 @dataclass
-class Stats:
-    age: int = 6
-    health: int = 70
-    happiness: int = 70
-    knowledge: int = 30
-    money: int = 20
-
-    def clamp(self) -> None:
-        self.health = max(0, min(100, self.health))
-        self.happiness = max(0, min(100, self.happiness))
-        self.knowledge = max(0, min(100, self.knowledge))
-        self.money = max(0, min(300, self.money))
-
-
-Action = Callable[[Stats], str]
+class Equipment:
+    name: str
+    attack: int = 0
+    defense: int = 0
 
 
 @dataclass
-class ActionEntry:
-    label: str
-    action: Action
-    min_age: int = 6
-    hint: str = ""
+class Player:
+    x: float = 400
+    y: float = 260
+    speed: float = 4.0
+    max_hp: int = 120
+    hp: int = 120
+    level: int = 1
+    exp: int = 0
+    exp_to_next: int = 30
+    gold: int = 0
+    base_attack: int = 8
+    base_defense: int = 2
+    weapon: Equipment | None = None
+    armor: Equipment | None = None
+
+    def attack_power(self) -> int:
+        bonus = 0
+        if self.weapon:
+            bonus += self.weapon.attack
+        if self.armor:
+            bonus += self.armor.attack
+        return self.base_attack + bonus
+
+    def defense_power(self) -> int:
+        bonus = 0
+        if self.weapon:
+            bonus += self.weapon.defense
+        if self.armor:
+            bonus += self.armor.defense
+        return self.base_defense + bonus
+
+    def gain_exp(self, amount: int) -> bool:
+        self.exp += amount
+        leveled = False
+        while self.exp >= self.exp_to_next:
+            self.exp -= self.exp_to_next
+            self.level += 1
+            self.exp_to_next = int(self.exp_to_next * 1.35 + 5)
+            self.max_hp += 15
+            self.hp = min(self.max_hp, self.hp + 20)
+            self.base_attack += 2
+            self.base_defense += 1
+            leveled = True
+        return leveled
 
 
-def study(stats: Stats) -> str:
-    stats.knowledge += 12
-    stats.happiness -= 6
-    stats.money -= 2
-    return "공부했다. 지식 +12, 행복 -6, 용돈 -2"
+@dataclass
+class Monster:
+    x: float
+    y: float
+    hp: int
+    max_hp: int
+    attack: int
+    exp_reward: int
+    gold_reward: int
+    speed: float
 
 
-def play(stats: Stats) -> str:
-    stats.happiness += 12
-    stats.health += 4
-    stats.money -= 3
-    return "놀았다. 행복 +12, 건강 +4, 용돈 -3"
+@dataclass
+class Drop:
+    x: float
+    y: float
+    kind: str
+    amount: int = 0
+    equipment: Equipment | None = None
 
 
-def part_time(stats: Stats) -> str:
-    stats.money += 18
-    stats.health -= 6
-    stats.happiness -= 4
-    return "아르바이트를 했다. 돈 +18, 건강 -6, 행복 -4"
+@dataclass
+class GameState:
+    player: Player = field(default_factory=Player)
+    monsters: list[Monster] = field(default_factory=list)
+    drops: list[Drop] = field(default_factory=list)
+    inventory: list[Equipment] = field(default_factory=list)
+    keys: set[str] = field(default_factory=set)
+    combo_timer: int = 0
 
 
-def exercise(stats: Stats) -> str:
-    stats.health += 12
-    stats.happiness += 2
-    stats.money -= 2
-    return "운동했다. 건강 +12, 행복 +2, 용돈 -2"
-
-
-def rest(stats: Stats) -> str:
-    stats.health += 8
-    stats.happiness += 6
-    return "쉬었다. 건강 +8, 행복 +6"
-
-
-def travel(stats: Stats) -> str:
-    stats.happiness += 16
-    stats.knowledge += 4
-    stats.money -= 12
-    return "여행을 다녀왔다. 행복 +16, 지식 +4, 돈 -12"
-
-
-def start_business(stats: Stats) -> str:
-    outcome = random.choice(["boom", "steady", "bust"])
-    if outcome == "boom":
-        stats.money += 30
-        stats.happiness += 6
-        stats.health -= 4
-        return "창업이 대성공! 돈 +30, 행복 +6, 건강 -4"
-    if outcome == "steady":
-        stats.money += 12
-        stats.happiness += 2
-        stats.health -= 2
-        return "창업이 안정적으로 성장했다. 돈 +12, 행복 +2, 건강 -2"
-    stats.money -= 8
-    stats.happiness -= 6
-    stats.health -= 4
-    return "창업이 실패했다. 돈 -8, 행복 -6, 건강 -4"
-
-
-def yearly_event(stats: Stats) -> str:
-    events = [
-        ("감기에 걸렸다.", -8, -3, 0, 0),
-        ("친구와 좋은 추억을 만들었다.", 0, 10, 0, -2),
-        ("책을 읽고 영감을 얻었다.", 0, 3, 8, -1),
-        ("경품에 당첨됐다!", 0, 6, 0, 12),
-        ("스트레스를 받았다.", -4, -10, 0, 0),
-        ("가족과 시간을 보냈다.", 2, 8, 0, -1),
-        ("새로운 멘토를 만났다.", 0, 4, 6, -2),
-        ("큰 공연을 보고 감동했다.", 0, 8, 3, -4),
-    ]
-    text, health, happiness, knowledge, money = random.choice(events)
-    stats.health += health
-    stats.happiness += happiness
-    stats.knowledge += knowledge
-    stats.money += money
-    return f"연간 이벤트: {text}"
-
-
-def milestone_event(stats: Stats) -> str | None:
-    milestones = {
-        10: ("학교 발표회에서 상을 받았다!", 0, 6, 6, 2),
-        13: ("첫 동아리에 가입했다.", 0, 8, 4, -1),
-        16: ("진로를 고민하기 시작했다.", 0, -2, 8, 0),
-        19: ("첫 직장 면접에 합격했다!", 0, 6, 4, 10),
-        22: ("독립하여 자취를 시작했다.", -2, 4, 0, -8),
-        25: ("인생의 방향을 다시 정리했다.", 2, 4, 4, 0),
-    }
-    if stats.age in milestones:
-        text, health, happiness, knowledge, money = milestones[stats.age]
-        stats.health += health
-        stats.happiness += happiness
-        stats.knowledge += knowledge
-        stats.money += money
-        return f"인생 이벤트: {text}"
-    return None
-
-
-def end_summary(stats: Stats) -> str:
-    score = stats.health + stats.happiness + stats.knowledge + stats.money
-    if score >= 340:
-        ending = "당신은 균형 잡힌 인생을 살아냈다!"
-    elif stats.knowledge >= 85:
-        ending = "학자로 성장했다!"
-    elif stats.money >= 180:
-        ending = "부자가 되었다!"
-    elif stats.happiness >= 85:
-        ending = "행복한 인생을 살았다!"
-    elif stats.health <= 20:
-        ending = "건강을 돌보는 법을 배웠다."
-    else:
-        ending = "평범하지만 소중한 삶이었다."
-    return f"\n최종 나이: {stats.age}살\n{ending}"
-
-
-def stats_line(stats: Stats) -> str:
-    return (
-        f"나이: {stats.age}살 | 건강 {stats.health:3d} | 행복 {stats.happiness:3d} | "
-        f"지식 {stats.knowledge:3d} | 돈 {stats.money:3d}"
-    )
-
-
-class LifeSimulatorApp:
+class MapleHuntGame:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        self.stats = Stats()
-        self.actions: list[ActionEntry] = [
-            ActionEntry("공부", study, hint="지식 상승"),
-            ActionEntry("놀기", play, hint="행복 상승"),
-            ActionEntry("아르바이트", part_time, min_age=12, hint="돈 상승"),
-            ActionEntry("운동", exercise, hint="건강 상승"),
-            ActionEntry("휴식", rest, hint="회복"),
-            ActionEntry("여행", travel, min_age=15, hint="행복/지식"),
-            ActionEntry("창업", start_business, min_age=18, hint="큰 수익"),
-        ]
-
-        self.root.title("인생 시뮬레이터: 드림 라이프")
-        self.root.geometry("980x640")
+        self.root.title("메이플 훈트: 미니 액션 RPG")
+        self.root.geometry("1060x720")
         self.root.resizable(False, False)
 
         style = ttk.Style(root)
         style.theme_use("clam")
         style.configure("Title.TLabel", font=("Apple SD Gothic Neo", 20, "bold"))
-        style.configure("Subtitle.TLabel", font=("Apple SD Gothic Neo", 11))
-        style.configure("StatName.TLabel", font=("Apple SD Gothic Neo", 10, "bold"))
+        style.configure("Stat.TLabel", font=("Apple SD Gothic Neo", 10, "bold"))
+        style.configure("Info.TLabel", font=("Apple SD Gothic Neo", 10))
         style.configure("Action.TButton", font=("Apple SD Gothic Neo", 10, "bold"))
 
-        container = ttk.Frame(root, padding=16)
+        container = ttk.Frame(root, padding=14)
         container.pack(fill=tk.BOTH, expand=True)
 
         header = ttk.Frame(container)
         header.pack(fill=tk.X)
-
-        title = ttk.Label(header, text="인생 시뮬레이터: 드림 라이프", style="Title.TLabel")
-        title.pack(anchor=tk.W)
-
-        subtitle = ttk.Label(
+        ttk.Label(header, text="메이플 훈트: 미니 액션 RPG", style="Title.TLabel").pack(anchor=tk.W)
+        ttk.Label(
             header,
-            text="6살부터 25살까지 매년 선택이 당신의 삶을 결정합니다.",
-            style="Subtitle.TLabel",
+            text="방향키 또는 WASD로 이동, 스페이스로 공격하세요. 드랍을 주워 장비를 착용!",
+            style="Info.TLabel",
             foreground="#4a4a4a",
-        )
-        subtitle.pack(anchor=tk.W, pady=(4, 10))
+        ).pack(anchor=tk.W, pady=(4, 10))
 
         main = ttk.Frame(container)
         main.pack(fill=tk.BOTH, expand=True)
 
         left_panel = ttk.Frame(main)
         left_panel.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 12))
-
         right_panel = ttk.Frame(main)
         right_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        self.stats_var = tk.StringVar(value=stats_line(self.stats))
-        stats_label = ttk.Label(left_panel, textvariable=self.stats_var, font=("Arial", 11))
-        stats_label.pack(anchor=tk.W, pady=(0, 8))
+        self.state = GameState()
+        self.stats_var = tk.StringVar(value="")
+        self.hp_var = tk.StringVar(value="")
+        self.attack_var = tk.StringVar(value="")
+        self.defense_var = tk.StringVar(value="")
+        self.gold_var = tk.StringVar(value="")
+        self.exp_var = tk.StringVar(value="")
+        self.weapon_var = tk.StringVar(value="")
+        self.armor_var = tk.StringVar(value="")
 
-        stat_box = ttk.LabelFrame(left_panel, text="상태 지표")
-        stat_box.pack(fill=tk.X, pady=(0, 12))
+        stats_box = ttk.LabelFrame(left_panel, text="용사 정보")
+        stats_box.pack(fill=tk.X, pady=(0, 10))
+        ttk.Label(stats_box, textvariable=self.stats_var, style="Info.TLabel").pack(anchor=tk.W, padx=8, pady=2)
+        ttk.Label(stats_box, textvariable=self.hp_var, style="Info.TLabel").pack(anchor=tk.W, padx=8, pady=2)
+        ttk.Label(stats_box, textvariable=self.exp_var, style="Info.TLabel").pack(anchor=tk.W, padx=8, pady=2)
+        ttk.Label(stats_box, textvariable=self.attack_var, style="Info.TLabel").pack(anchor=tk.W, padx=8, pady=2)
+        ttk.Label(stats_box, textvariable=self.defense_var, style="Info.TLabel").pack(anchor=tk.W, padx=8, pady=2)
+        ttk.Label(stats_box, textvariable=self.gold_var, style="Info.TLabel").pack(anchor=tk.W, padx=8, pady=2)
+        ttk.Label(stats_box, textvariable=self.weapon_var, style="Info.TLabel").pack(anchor=tk.W, padx=8, pady=2)
+        ttk.Label(stats_box, textvariable=self.armor_var, style="Info.TLabel").pack(anchor=tk.W, padx=8, pady=2)
 
-        self.health_bar = self._build_bar(stat_box, "건강", 100)
-        self.happiness_bar = self._build_bar(stat_box, "행복", 100)
-        self.knowledge_bar = self._build_bar(stat_box, "지식", 100)
-        self.money_bar = self._build_bar(stat_box, "돈", 300)
+        inventory_box = ttk.LabelFrame(left_panel, text="드랍 장비")
+        inventory_box.pack(fill=tk.X, pady=(0, 10))
 
-        action_box = ttk.LabelFrame(left_panel, text="행동 선택")
-        action_box.pack(fill=tk.X, pady=(0, 12))
+        self.inventory_list = tk.Listbox(inventory_box, height=8)
+        self.inventory_list.pack(fill=tk.X, padx=8, pady=6)
 
-        self.action_buttons: list[ttk.Button] = []
-        for entry in self.actions:
-            button = ttk.Button(
-                action_box,
-                text=f"{entry.label} ({entry.hint})" if entry.hint else entry.label,
-                style="Action.TButton",
-                command=lambda act=entry: self.handle_action(act),
-            )
-            button.pack(fill=tk.X, pady=3)
-            self.action_buttons.append(button)
-
-        self.quit_button = ttk.Button(left_panel, text="저장 없이 종료", command=self.quit_game)
-        self.quit_button.pack(fill=tk.X)
-
-        self.canvas = tk.Canvas(right_panel, width=520, height=320, background="#dcecff", highlightthickness=0)
-        self.canvas.pack(fill=tk.X)
-
-        log_box = ttk.LabelFrame(right_panel, text="연간 기록")
-        log_box.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
+        button_frame = ttk.Frame(inventory_box)
+        button_frame.pack(fill=tk.X, padx=8, pady=(0, 8))
+        ttk.Button(button_frame, text="장비 착용", style="Action.TButton", command=self.equip_selected).pack(
+            side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 4)
+        )
+        ttk.Button(button_frame, text="장비 버리기", style="Action.TButton", command=self.discard_selected).pack(
+            side=tk.LEFT, expand=True, fill=tk.X, padx=(4, 0)
+        )
 
         self.log = tk.Text(
-            log_box,
-            height=12,
+            left_panel,
+            height=16,
             wrap=tk.WORD,
             state=tk.DISABLED,
             background="#f7f7f7",
             relief=tk.FLAT,
         )
-        self.log.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
+        self.log.pack(fill=tk.BOTH, expand=True)
 
-        self.append_log("게임을 시작합니다! 매년 행동을 선택하세요.")
-        self.update_stats()
-        self.draw_scene()
+        self.canvas = tk.Canvas(right_panel, width=720, height=520, background="#dff5ff", highlightthickness=0)
+        self.canvas.pack(fill=tk.BOTH, expand=True)
 
-    def _build_bar(self, parent: ttk.Frame, label: str, maximum: int) -> ttk.Progressbar:
-        frame = ttk.Frame(parent)
-        frame.pack(fill=tk.X, padx=8, pady=4)
-        ttk.Label(frame, text=label, style="StatName.TLabel").pack(anchor=tk.W)
-        bar = ttk.Progressbar(frame, maximum=maximum)
-        bar.pack(fill=tk.X, pady=(2, 0))
-        return bar
+        self.root.bind("<KeyPress>", self.on_key_press)
+        self.root.bind("<KeyRelease>", self.on_key_release)
+
+        self.spawn_initial_monsters()
+        self.append_log("메이플 숲에 오신 것을 환영합니다! 몬스터를 처치하세요.")
+        self.update_ui()
+        self.loop()
 
     def append_log(self, message: str) -> None:
         self.log.configure(state=tk.NORMAL)
@@ -271,110 +192,283 @@ class LifeSimulatorApp:
         self.log.see(tk.END)
         self.log.configure(state=tk.DISABLED)
 
-    def update_stats(self) -> None:
-        self.stats_var.set(stats_line(self.stats))
-        self.health_bar["value"] = self.stats.health
-        self.happiness_bar["value"] = self.stats.happiness
-        self.knowledge_bar["value"] = self.stats.knowledge
-        self.money_bar["value"] = self.stats.money
-        self.update_action_states()
-        self.draw_scene()
+    def update_ui(self) -> None:
+        player = self.state.player
+        self.stats_var.set(f"레벨 {player.level} | HP {player.hp}/{player.max_hp}")
+        self.hp_var.set(f"이동 속도: {player.speed:.1f}")
+        self.exp_var.set(f"EXP {player.exp}/{player.exp_to_next}")
+        self.attack_var.set(f"공격력: {player.attack_power()}")
+        self.defense_var.set(f"방어력: {player.defense_power()}")
+        self.gold_var.set(f"골드: {player.gold}")
+        self.weapon_var.set(f"무기: {player.weapon.name if player.weapon else '없음'}")
+        self.armor_var.set(f"방어구: {player.armor.name if player.armor else '없음'}")
 
-    def update_action_states(self) -> None:
-        for button, entry in zip(self.action_buttons, self.actions):
-            if self.stats.age < entry.min_age:
-                button.configure(state=tk.DISABLED)
-            else:
-                button.configure(state=tk.NORMAL)
+        self.inventory_list.delete(0, tk.END)
+        for item in self.state.inventory:
+            desc = f"{item.name} (공격 +{item.attack}, 방어 +{item.defense})"
+            self.inventory_list.insert(tk.END, desc)
+
+    def on_key_press(self, event: tk.Event) -> None:
+        if event.keysym:
+            self.state.keys.add(event.keysym.lower())
+        if event.keysym == "space":
+            self.attack_monsters()
+
+    def on_key_release(self, event: tk.Event) -> None:
+        if event.keysym:
+            self.state.keys.discard(event.keysym.lower())
+
+    def loop(self) -> None:
+        self.handle_movement()
+        self.update_monsters()
+        self.collect_drops()
+        self.draw_scene()
+        self.update_ui()
+        self.root.after(40, self.loop)
+
+    def handle_movement(self) -> None:
+        player = self.state.player
+        dx = dy = 0.0
+        if "left" in self.state.keys or "a" in self.state.keys:
+            dx -= player.speed
+        if "right" in self.state.keys or "d" in self.state.keys:
+            dx += player.speed
+        if "up" in self.state.keys or "w" in self.state.keys:
+            dy -= player.speed
+        if "down" in self.state.keys or "s" in self.state.keys:
+            dy += player.speed
+
+        if dx and dy:
+            dx *= 0.75
+            dy *= 0.75
+
+        player.x = min(700, max(20, player.x + dx))
+        player.y = min(480, max(40, player.y + dy))
+
+    def spawn_initial_monsters(self) -> None:
+        for _ in range(4):
+            self.state.monsters.append(self.create_monster())
+
+    def create_monster(self) -> Monster:
+        level = random.randint(1, 3 + self.state.player.level // 2)
+        hp = 20 + level * 8
+        attack = 4 + level * 2
+        exp = 8 + level * 4
+        gold = 6 + level * 3
+        speed = random.uniform(1.2, 2.0)
+        x = random.uniform(80, 640)
+        y = random.uniform(80, 440)
+        return Monster(x=x, y=y, hp=hp, max_hp=hp, attack=attack, exp_reward=exp, gold_reward=gold, speed=speed)
+
+    def update_monsters(self) -> None:
+        player = self.state.player
+        for monster in self.state.monsters:
+            dx = player.x - monster.x
+            dy = player.y - monster.y
+            dist = max(1.0, (dx**2 + dy**2) ** 0.5)
+            monster.x += monster.speed * dx / dist
+            monster.y += monster.speed * dy / dist
+
+            if dist < 26:
+                damage = max(1, monster.attack - player.defense_power())
+                player.hp = max(0, player.hp - damage)
+                self.state.combo_timer = 15
+                if player.hp == 0:
+                    self.append_log("용사가 쓰러졌습니다! 휴식 후 다시 도전하세요.")
+                    player.hp = player.max_hp
+                    player.gold = max(0, player.gold - 20)
+                    player.x, player.y = 400, 260
+                    self.state.drops.clear()
+                    break
+
+        while len(self.state.monsters) < 6:
+            self.state.monsters.append(self.create_monster())
+
+    def attack_monsters(self) -> None:
+        player = self.state.player
+        hit = False
+        for monster in list(self.state.monsters):
+            dist = ((monster.x - player.x) ** 2 + (monster.y - player.y) ** 2) ** 0.5
+            if dist < 60:
+                damage = player.attack_power() + random.randint(0, 4)
+                monster.hp = max(0, monster.hp - damage)
+                hit = True
+                if monster.hp == 0:
+                    self.handle_monster_down(monster)
+        if hit:
+            self.append_log("검을 휘둘렀다!")
+
+    def handle_monster_down(self, monster: Monster) -> None:
+        self.state.monsters.remove(monster)
+        player = self.state.player
+        leveled = player.gain_exp(monster.exp_reward)
+        player.gold += monster.gold_reward
+        self.append_log(f"몬스터 처치! 경험치 +{monster.exp_reward}, 골드 +{monster.gold_reward}")
+        if leveled:
+            self.append_log(f"레벨 업! Lv.{player.level} 달성")
+        self.spawn_drops(monster.x, monster.y)
+
+    def spawn_drops(self, x: float, y: float) -> None:
+        if random.random() < 0.75:
+            self.state.drops.append(Drop(x=x + random.uniform(-12, 12), y=y, kind="exp", amount=6))
+        if random.random() < 0.7:
+            self.state.drops.append(Drop(x=x, y=y + random.uniform(-12, 12), kind="gold", amount=8))
+        if random.random() < 0.45:
+            self.state.drops.append(Drop(x=x - 8, y=y - 4, kind="gem", amount=12))
+        if random.random() < 0.35:
+            self.state.drops.append(Drop(x=x + 6, y=y + 6, kind="gear", equipment=self.random_equipment()))
+
+    def random_equipment(self) -> Equipment:
+        prefixes = ["빛나는", "단단한", "불꽃", "얼음", "바람", "별빛"]
+        weapons = ["검", "창", "활", "마검", "대검"]
+        armors = ["망토", "갑옷", "부츠", "장갑"]
+        if random.random() < 0.5:
+            name = f"{random.choice(prefixes)} {random.choice(weapons)}"
+            return Equipment(name=name, attack=random.randint(3, 7), defense=random.randint(0, 2))
+        name = f"{random.choice(prefixes)} {random.choice(armors)}"
+        return Equipment(name=name, attack=random.randint(0, 2), defense=random.randint(3, 7))
+
+    def collect_drops(self) -> None:
+        player = self.state.player
+        for drop in list(self.state.drops):
+            dist = ((drop.x - player.x) ** 2 + (drop.y - player.y) ** 2) ** 0.5
+            if dist < 25:
+                if drop.kind == "exp":
+                    player.gain_exp(drop.amount)
+                    self.append_log(f"경험치 구슬 +{drop.amount}")
+                elif drop.kind == "gold":
+                    player.gold += drop.amount
+                    self.append_log(f"골드 주머니 +{drop.amount}")
+                elif drop.kind == "gem":
+                    player.gold += drop.amount
+                    player.hp = min(player.max_hp, player.hp + 6)
+                    self.append_log("생명의 수정! HP 회복")
+                elif drop.kind == "gear" and drop.equipment:
+                    self.state.inventory.append(drop.equipment)
+                    self.append_log(f"장비 획득: {drop.equipment.name}")
+                self.state.drops.remove(drop)
+
+    def equip_selected(self) -> None:
+        selection = self.inventory_list.curselection()
+        if not selection:
+            return
+        index = selection[0]
+        item = self.state.inventory.pop(index)
+        if "갑옷" in item.name or "망토" in item.name or "부츠" in item.name or "장갑" in item.name:
+            if self.state.player.armor:
+                self.state.inventory.append(self.state.player.armor)
+            self.state.player.armor = item
+            self.append_log(f"방어구 착용: {item.name}")
+        else:
+            if self.state.player.weapon:
+                self.state.inventory.append(self.state.player.weapon)
+            self.state.player.weapon = item
+            self.append_log(f"무기 착용: {item.name}")
+
+    def discard_selected(self) -> None:
+        selection = self.inventory_list.curselection()
+        if not selection:
+            return
+        item = self.state.inventory.pop(selection[0])
+        self.append_log(f"장비 버림: {item.name}")
 
     def draw_scene(self) -> None:
         self.canvas.delete("all")
-        self.canvas.create_rectangle(0, 0, 520, 220, fill="#b9e6ff", outline="")
-        self.canvas.create_rectangle(0, 220, 520, 320, fill="#9ad16f", outline="")
-        self.canvas.create_oval(30, 20, 90, 80, fill="#ffe066", outline="")
-        self.canvas.create_rectangle(360, 140, 470, 240, fill="#f8c291", outline="#c97c4f")
-        self.canvas.create_polygon(350, 140, 420, 90, 490, 140, fill="#c44536", outline="#c44536")
-        self.canvas.create_rectangle(395, 180, 430, 240, fill="#704214", outline="")
-        self.canvas.create_rectangle(380, 160, 400, 180, fill="#dff9fb", outline="")
-        self.canvas.create_rectangle(435, 160, 455, 180, fill="#dff9fb", outline="")
+        self.draw_background()
+        self.draw_drops()
+        self.draw_monsters()
+        self.draw_player()
+        self.draw_ui_effects()
 
-        mood = self._mood_level()
-        body_color = "#6c5ce7" if mood == "good" else "#0984e3" if mood == "okay" else "#b2bec3"
-        face_color = "#ffeaa7"
+    def draw_background(self) -> None:
+        self.canvas.create_rectangle(0, 0, 720, 200, fill="#b9e6ff", outline="")
+        self.canvas.create_rectangle(0, 200, 720, 520, fill="#93d37a", outline="")
+        for x in range(0, 720, 120):
+            self.canvas.create_oval(x + 10, 40, x + 90, 110, fill="#fff0a6", outline="")
+        for x in range(60, 720, 160):
+            self.canvas.create_rectangle(x, 260, x + 20, 340, fill="#8e5a2a", outline="")
+            self.canvas.create_oval(x - 30, 210, x + 50, 290, fill="#4caf50", outline="")
+            self.canvas.create_oval(x - 40, 220, x + 60, 310, fill="#43a047", outline="")
 
-        self.canvas.create_oval(230, 150, 290, 210, fill=face_color, outline="")
-        self.canvas.create_rectangle(245, 210, 275, 270, fill=body_color, outline="")
-        self.canvas.create_line(255, 230, 230, 250, width=4, fill=body_color)
-        self.canvas.create_line(265, 230, 300, 250, width=4, fill=body_color)
-        self.canvas.create_line(255, 270, 240, 305, width=4, fill=body_color)
-        self.canvas.create_line(270, 270, 285, 305, width=4, fill=body_color)
+        self.canvas.create_rectangle(520, 260, 680, 380, fill="#f5c38a", outline="#d19057")
+        self.canvas.create_polygon(500, 260, 600, 200, 700, 260, fill="#d3544a", outline="#d3544a")
+        self.canvas.create_rectangle(575, 310, 615, 380, fill="#855c3a", outline="")
 
-        if mood == "good":
-            self.canvas.create_arc(245, 175, 275, 200, start=180, extent=180, style=tk.ARC, width=2)
-        elif mood == "okay":
-            self.canvas.create_line(245, 190, 275, 190, width=2)
-        else:
-            self.canvas.create_arc(245, 190, 275, 215, start=0, extent=180, style=tk.ARC, width=2)
+    def draw_player(self) -> None:
+        player = self.state.player
+        self.canvas.create_oval(player.x - 14, player.y - 30, player.x + 14, player.y - 2, fill="#ffdd99", outline="")
+        self.canvas.create_rectangle(player.x - 16, player.y - 2, player.x + 16, player.y + 32, fill="#6c5ce7", outline="")
+        self.canvas.create_line(player.x - 6, player.y + 12, player.x - 26, player.y + 20, width=4, fill="#6c5ce7")
+        self.canvas.create_line(player.x + 6, player.y + 12, player.x + 26, player.y + 20, width=4, fill="#6c5ce7")
+        self.canvas.create_line(player.x - 6, player.y + 32, player.x - 12, player.y + 52, width=4, fill="#6c5ce7")
+        self.canvas.create_line(player.x + 6, player.y + 32, player.x + 12, player.y + 52, width=4, fill="#6c5ce7")
+        self.canvas.create_oval(player.x - 5, player.y - 22, player.x - 1, player.y - 18, fill="#2d3436", outline="")
+        self.canvas.create_oval(player.x + 1, player.y - 22, player.x + 5, player.y - 18, fill="#2d3436", outline="")
+        self.canvas.create_arc(player.x - 6, player.y - 16, player.x + 6, player.y - 8, start=180, extent=180, style=tk.ARC, width=2)
 
-        self.canvas.create_oval(250, 170, 255, 175, fill="#2d3436", outline="")
-        self.canvas.create_oval(265, 170, 270, 175, fill="#2d3436", outline="")
+    def draw_monsters(self) -> None:
+        for monster in self.state.monsters:
+            color = "#f78fb3" if monster.max_hp < 40 else "#63cdda"
+            self.canvas.create_oval(monster.x - 16, monster.y - 16, monster.x + 16, monster.y + 16, fill=color, outline="")
+            self.canvas.create_oval(monster.x - 6, monster.y - 4, monster.x - 2, monster.y, fill="#2d3436", outline="")
+            self.canvas.create_oval(monster.x + 2, monster.y - 4, monster.x + 6, monster.y, fill="#2d3436", outline="")
+            self.canvas.create_line(monster.x - 6, monster.y + 6, monster.x + 6, monster.y + 6, width=2)
+            hp_ratio = monster.hp / monster.max_hp
+            bar_width = 28
+            self.canvas.create_rectangle(
+                monster.x - bar_width / 2,
+                monster.y - 26,
+                monster.x + bar_width / 2,
+                monster.y - 20,
+                fill="#dfe6e9",
+                outline="",
+            )
+            self.canvas.create_rectangle(
+                monster.x - bar_width / 2,
+                monster.y - 26,
+                monster.x - bar_width / 2 + bar_width * hp_ratio,
+                monster.y - 20,
+                fill="#ff6b6b",
+                outline="",
+            )
 
-        self.canvas.create_text(
-            260,
-            20,
-            text=f"{self.stats.age}살 드림 라이프",
-            font=("Apple SD Gothic Neo", 12, "bold"),
-            fill="#2d3436",
-        )
+    def draw_drops(self) -> None:
+        for drop in self.state.drops:
+            if drop.kind == "exp":
+                self.canvas.create_oval(drop.x - 6, drop.y - 6, drop.x + 6, drop.y + 6, fill="#74b9ff", outline="")
+            elif drop.kind == "gold":
+                self.canvas.create_oval(drop.x - 7, drop.y - 7, drop.x + 7, drop.y + 7, fill="#feca57", outline="")
+            elif drop.kind == "gem":
+                self.canvas.create_polygon(
+                    drop.x,
+                    drop.y - 8,
+                    drop.x + 8,
+                    drop.y,
+                    drop.x,
+                    drop.y + 8,
+                    drop.x - 8,
+                    drop.y,
+                    fill="#55efc4",
+                    outline="",
+                )
+            elif drop.kind == "gear":
+                self.canvas.create_rectangle(drop.x - 6, drop.y - 6, drop.x + 6, drop.y + 6, fill="#a29bfe", outline="")
 
-    def _mood_level(self) -> str:
-        if self.stats.health >= 70 and self.stats.happiness >= 70:
-            return "good"
-        if self.stats.health >= 40 and self.stats.happiness >= 40:
-            return "okay"
-        return "low"
-
-    def handle_action(self, entry: ActionEntry) -> None:
-        if self.stats.age > 25:
-            return
-        if self.stats.age < entry.min_age:
-            self.append_log(f"{entry.label}은(는) {entry.min_age}살 이후에 가능합니다.")
-            return
-        self.append_log(f"{self.stats.age}살: {entry.label} 선택")
-        result = entry.action(self.stats)
-        event_result = yearly_event(self.stats)
-        milestone = milestone_event(self.stats)
-        self.stats.clamp()
-        self.append_log(result)
-        self.append_log(event_result)
-        if milestone:
-            self.append_log(milestone)
-        self.stats.age += 1
-        self.update_stats()
-
-        if self.stats.health == 0 or self.stats.happiness == 0:
-            self.append_log("체력 또는 행복이 0이 되어 게임이 종료되었습니다.")
-            self.finish_game()
-        elif self.stats.age > 25:
-            self.finish_game()
-
-    def finish_game(self) -> None:
-        summary = end_summary(self.stats)
-        self.append_log(summary.strip())
-        for button in self.action_buttons:
-            button.configure(state=tk.DISABLED)
-        self.quit_button.configure(state=tk.DISABLED)
-        messagebox.showinfo("게임 종료", summary)
-
-    def quit_game(self) -> None:
-        if messagebox.askyesno("종료", "저장하지 않고 종료할까요?"):
-            self.append_log("게임을 저장하지 않고 종료합니다.")
-            self.finish_game()
+    def draw_ui_effects(self) -> None:
+        if self.state.combo_timer > 0:
+            self.canvas.create_text(
+                620,
+                40,
+                text="콤보!",
+                font=("Apple SD Gothic Neo", 16, "bold"),
+                fill="#fdcb6e",
+            )
+            self.state.combo_timer -= 1
 
 
 def run_game() -> None:
     root = tk.Tk()
-    LifeSimulatorApp(root)
+    MapleHuntGame(root)
     root.mainloop()
 
 
