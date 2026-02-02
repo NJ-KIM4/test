@@ -21,6 +21,9 @@ class Player:
     x: float = 400
     y: float = 260
     speed: float = 4.0
+    vy: float = 0.0
+    on_ground: bool = True
+    jump_strength: float = 12.0
     max_hp: int = 120
     hp: int = 120
     level: int = 1
@@ -101,6 +104,10 @@ class MapleHuntGame:
         self.root.geometry("1060x720")
         self.root.resizable(False, False)
 
+        self.ground_y = 440
+        self.player_ground_offset = 52
+        self.gravity = 0.6
+
         style = ttk.Style(root)
         style.theme_use("clam")
         style.configure("Title.TLabel", font=("Apple SD Gothic Neo", 20, "bold"))
@@ -116,7 +123,7 @@ class MapleHuntGame:
         ttk.Label(header, text="메이플 훈트: 미니 액션 RPG", style="Title.TLabel").pack(anchor=tk.W)
         ttk.Label(
             header,
-            text="방향키 또는 WASD로 이동, 스페이스로 공격하세요. 드랍을 주워 장비를 착용!",
+            text="좌우 이동은 방향키/A,D, 점프는 스페이스, 공격은 J 키! 인벤토리에서 장비를 착용하세요.",
             style="Info.TLabel",
             foreground="#4a4a4a",
         ).pack(anchor=tk.W, pady=(4, 10))
@@ -130,6 +137,7 @@ class MapleHuntGame:
         right_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         self.state = GameState()
+        self.state.player.y = self.ground_y - self.player_ground_offset
         self.stats_var = tk.StringVar(value="")
         self.hp_var = tk.StringVar(value="")
         self.attack_var = tk.StringVar(value="")
@@ -150,20 +158,14 @@ class MapleHuntGame:
         ttk.Label(stats_box, textvariable=self.weapon_var, style="Info.TLabel").pack(anchor=tk.W, padx=8, pady=2)
         ttk.Label(stats_box, textvariable=self.armor_var, style="Info.TLabel").pack(anchor=tk.W, padx=8, pady=2)
 
-        inventory_box = ttk.LabelFrame(left_panel, text="드랍 장비")
+        inventory_box = ttk.LabelFrame(left_panel, text="인벤토리")
         inventory_box.pack(fill=tk.X, pady=(0, 10))
-
-        self.inventory_list = tk.Listbox(inventory_box, height=8)
-        self.inventory_list.pack(fill=tk.X, padx=8, pady=6)
-
-        button_frame = ttk.Frame(inventory_box)
-        button_frame.pack(fill=tk.X, padx=8, pady=(0, 8))
-        ttk.Button(button_frame, text="장비 착용", style="Action.TButton", command=self.equip_selected).pack(
-            side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 4)
-        )
-        ttk.Button(button_frame, text="장비 버리기", style="Action.TButton", command=self.discard_selected).pack(
-            side=tk.LEFT, expand=True, fill=tk.X, padx=(4, 0)
-        )
+        ttk.Button(
+            inventory_box,
+            text="인벤토리 열기 (I)",
+            style="Action.TButton",
+            command=self.open_inventory,
+        ).pack(fill=tk.X, padx=8, pady=8)
 
         self.log = tk.Text(
             left_panel,
@@ -178,6 +180,10 @@ class MapleHuntGame:
         self.canvas = tk.Canvas(right_panel, width=720, height=520, background="#dff5ff", highlightthickness=0)
         self.canvas.pack(fill=tk.BOTH, expand=True)
 
+        self.inventory_window: tk.Toplevel | None = None
+        self.inventory_list: tk.Listbox | None = None
+        self.drop_images = self.create_drop_images()
+
         self.root.bind("<KeyPress>", self.on_key_press)
         self.root.bind("<KeyRelease>", self.on_key_release)
 
@@ -185,6 +191,23 @@ class MapleHuntGame:
         self.append_log("메이플 숲에 오신 것을 환영합니다! 몬스터를 처치하세요.")
         self.update_ui()
         self.loop()
+
+    def create_drop_images(self) -> dict[str, tk.PhotoImage]:
+        images: dict[str, tk.PhotoImage] = {}
+
+        def make_icon(base: str, accent: str) -> tk.PhotoImage:
+            icon = tk.PhotoImage(width=14, height=14)
+            icon.put(base, to=(0, 0, 13, 13))
+            icon.put(accent, to=(4, 4, 9, 9))
+            icon.put("#ffffff", to=(6, 2, 7, 11))
+            icon.put("#ffffff", to=(2, 6, 11, 7))
+            return icon
+
+        images["exp"] = make_icon("#74b9ff", "#3c91e6")
+        images["gold"] = make_icon("#feca57", "#f5a623")
+        images["gem"] = make_icon("#55efc4", "#00b894")
+        images["gear"] = make_icon("#a29bfe", "#6c5ce7")
+        return images
 
     def append_log(self, message: str) -> None:
         self.log.configure(state=tk.NORMAL)
@@ -203,16 +226,21 @@ class MapleHuntGame:
         self.weapon_var.set(f"무기: {player.weapon.name if player.weapon else '없음'}")
         self.armor_var.set(f"방어구: {player.armor.name if player.armor else '없음'}")
 
-        self.inventory_list.delete(0, tk.END)
-        for item in self.state.inventory:
-            desc = f"{item.name} (공격 +{item.attack}, 방어 +{item.defense})"
-            self.inventory_list.insert(tk.END, desc)
+        if self.inventory_list is not None:
+            self.inventory_list.delete(0, tk.END)
+            for item in self.state.inventory:
+                desc = f"{item.name} (공격 +{item.attack}, 방어 +{item.defense})"
+                self.inventory_list.insert(tk.END, desc)
 
     def on_key_press(self, event: tk.Event) -> None:
         if event.keysym:
             self.state.keys.add(event.keysym.lower())
         if event.keysym == "space":
+            self.jump_player()
+        if event.keysym and event.keysym.lower() in ("j", "z"):
             self.attack_monsters()
+        if event.keysym and event.keysym.lower() == "i":
+            self.open_inventory()
 
     def on_key_release(self, event: tk.Event) -> None:
         if event.keysym:
@@ -228,22 +256,30 @@ class MapleHuntGame:
 
     def handle_movement(self) -> None:
         player = self.state.player
-        dx = dy = 0.0
+        dx = 0.0
         if "left" in self.state.keys or "a" in self.state.keys:
             dx -= player.speed
         if "right" in self.state.keys or "d" in self.state.keys:
             dx += player.speed
-        if "up" in self.state.keys or "w" in self.state.keys:
-            dy -= player.speed
-        if "down" in self.state.keys or "s" in self.state.keys:
-            dy += player.speed
-
-        if dx and dy:
-            dx *= 0.75
-            dy *= 0.75
 
         player.x = min(700, max(20, player.x + dx))
-        player.y = min(480, max(40, player.y + dy))
+
+        player.vy += self.gravity
+        player.y += player.vy
+
+        ground_limit = self.ground_y - self.player_ground_offset
+        if player.y >= ground_limit:
+            player.y = ground_limit
+            player.vy = 0.0
+            player.on_ground = True
+
+        player.y = max(40, player.y)
+
+    def jump_player(self) -> None:
+        player = self.state.player
+        if player.on_ground:
+            player.vy = -player.jump_strength
+            player.on_ground = False
 
     def spawn_initial_monsters(self) -> None:
         for _ in range(4):
@@ -257,7 +293,7 @@ class MapleHuntGame:
         gold = 6 + level * 3
         speed = random.uniform(1.2, 2.0)
         x = random.uniform(80, 640)
-        y = random.uniform(80, 440)
+        y = self.ground_y - 20
         return Monster(x=x, y=y, hp=hp, max_hp=hp, attack=attack, exp_reward=exp, gold_reward=gold, speed=speed)
 
     def update_monsters(self) -> None:
@@ -277,7 +313,8 @@ class MapleHuntGame:
                     self.append_log("용사가 쓰러졌습니다! 휴식 후 다시 도전하세요.")
                     player.hp = player.max_hp
                     player.gold = max(0, player.gold - 20)
-                    player.x, player.y = 400, 260
+                    player.x = 400
+                    player.y = self.ground_y - self.player_ground_offset
                     self.state.drops.clear()
                     break
 
@@ -349,6 +386,8 @@ class MapleHuntGame:
                 self.state.drops.remove(drop)
 
     def equip_selected(self) -> None:
+        if self.inventory_list is None:
+            return
         selection = self.inventory_list.curselection()
         if not selection:
             return
@@ -366,6 +405,8 @@ class MapleHuntGame:
             self.append_log(f"무기 착용: {item.name}")
 
     def discard_selected(self) -> None:
+        if self.inventory_list is None:
+            return
         selection = self.inventory_list.curselection()
         if not selection:
             return
@@ -383,6 +424,7 @@ class MapleHuntGame:
     def draw_background(self) -> None:
         self.canvas.create_rectangle(0, 0, 720, 200, fill="#b9e6ff", outline="")
         self.canvas.create_rectangle(0, 200, 720, 520, fill="#93d37a", outline="")
+        self.canvas.create_rectangle(0, self.ground_y, 720, 520, fill="#6ab04c", outline="")
         for x in range(0, 720, 120):
             self.canvas.create_oval(x + 10, 40, x + 90, 110, fill="#fff0a6", outline="")
         for x in range(60, 720, 160):
@@ -434,25 +476,42 @@ class MapleHuntGame:
 
     def draw_drops(self) -> None:
         for drop in self.state.drops:
-            if drop.kind == "exp":
-                self.canvas.create_oval(drop.x - 6, drop.y - 6, drop.x + 6, drop.y + 6, fill="#74b9ff", outline="")
-            elif drop.kind == "gold":
-                self.canvas.create_oval(drop.x - 7, drop.y - 7, drop.x + 7, drop.y + 7, fill="#feca57", outline="")
-            elif drop.kind == "gem":
-                self.canvas.create_polygon(
-                    drop.x,
-                    drop.y - 8,
-                    drop.x + 8,
-                    drop.y,
-                    drop.x,
-                    drop.y + 8,
-                    drop.x - 8,
-                    drop.y,
-                    fill="#55efc4",
-                    outline="",
-                )
-            elif drop.kind == "gear":
-                self.canvas.create_rectangle(drop.x - 6, drop.y - 6, drop.x + 6, drop.y + 6, fill="#a29bfe", outline="")
+            icon = self.drop_images.get(drop.kind)
+            if icon is not None:
+                self.canvas.create_image(drop.x, drop.y, image=icon)
+
+    def open_inventory(self) -> None:
+        if self.inventory_window and self.inventory_window.winfo_exists():
+            self.inventory_window.focus()
+            return
+        self.inventory_window = tk.Toplevel(self.root)
+        self.inventory_window.title("인벤토리")
+        self.inventory_window.geometry("340x360")
+        self.inventory_window.resizable(False, False)
+
+        frame = ttk.Frame(self.inventory_window, padding=12)
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        self.inventory_list = tk.Listbox(frame, height=10)
+        self.inventory_list.pack(fill=tk.BOTH, expand=True)
+
+        button_frame = ttk.Frame(frame)
+        button_frame.pack(fill=tk.X, pady=(8, 0))
+        ttk.Button(button_frame, text="장비 착용", style="Action.TButton", command=self.equip_selected).pack(
+            side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 4)
+        )
+        ttk.Button(button_frame, text="장비 버리기", style="Action.TButton", command=self.discard_selected).pack(
+            side=tk.LEFT, expand=True, fill=tk.X, padx=(4, 0)
+        )
+
+        self.inventory_window.protocol("WM_DELETE_WINDOW", self.close_inventory)
+        self.update_ui()
+
+    def close_inventory(self) -> None:
+        if self.inventory_window:
+            self.inventory_window.destroy()
+        self.inventory_window = None
+        self.inventory_list = None
 
     def draw_ui_effects(self) -> None:
         if self.state.combo_timer > 0:
