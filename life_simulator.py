@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Simple life simulator raising game (CLI)."""
+"""Simple life simulator raising game (GUI)."""
 
 from __future__ import annotations
 
 import random
+import tkinter as tk
 from dataclasses import dataclass
+from tkinter import messagebox, ttk
 from typing import Callable
 
 
@@ -94,57 +96,123 @@ def end_summary(stats: Stats) -> str:
     return f"\n최종 나이: {stats.age}살\n{ending}"
 
 
-def print_stats(stats: Stats) -> None:
-    bar = lambda value: "█" * (value // 10) + "·" * (10 - value // 10)
-    print(
-        f"나이: {stats.age}살 | 건강 {stats.health:3d} {bar(stats.health)} | "
-        f"행복 {stats.happiness:3d} {bar(stats.happiness)} | "
-        f"지식 {stats.knowledge:3d} {bar(stats.knowledge)} | "
-        f"돈 {stats.money:3d}"
+def stats_line(stats: Stats) -> str:
+    return (
+        f"나이: {stats.age}살 | 건강 {stats.health:3d} | 행복 {stats.happiness:3d} | "
+        f"지식 {stats.knowledge:3d} | 돈 {stats.money:3d}"
     )
 
 
-def choose_action() -> str:
-    print("\n행동을 선택하세요:")
-    print("1) 공부  2) 놀기  3) 아르바이트  4) 운동  5) 휴식  6) 저장하고 종료")
-    return input("> ").strip()
+class LifeSimulatorApp:
+    def __init__(self, root: tk.Tk) -> None:
+        self.root = root
+        self.stats = Stats()
+        self.actions: dict[str, Action] = {
+            "공부": study,
+            "놀기": play,
+            "아르바이트": part_time,
+            "운동": exercise,
+            "휴식": rest,
+        }
+
+        self.root.title("간단한 인생 시뮬레이터 키우기")
+        self.root.geometry("640x420")
+        self.root.resizable(False, False)
+
+        container = ttk.Frame(root, padding=16)
+        container.pack(fill=tk.BOTH, expand=True)
+
+        title = ttk.Label(
+            container,
+            text="간단한 인생 시뮬레이터 키우기",
+            font=("Apple SD Gothic Neo", 18, "bold"),
+        )
+        title.pack(anchor=tk.W)
+
+        subtitle = ttk.Label(
+            container,
+            text="6살부터 25살까지, 매년 하나의 행동을 선택합니다.",
+            foreground="#444",
+        )
+        subtitle.pack(anchor=tk.W, pady=(4, 10))
+
+        self.stats_var = tk.StringVar(value=stats_line(self.stats))
+        stats_label = ttk.Label(container, textvariable=self.stats_var, font=("Arial", 11))
+        stats_label.pack(anchor=tk.W, pady=(0, 8))
+
+        button_frame = ttk.Frame(container)
+        button_frame.pack(fill=tk.X, pady=(0, 12))
+
+        self.action_buttons: list[ttk.Button] = []
+        for idx, (label, action) in enumerate(self.actions.items()):
+            button = ttk.Button(
+                button_frame,
+                text=label,
+                command=lambda act=action: self.handle_action(act),
+            )
+            button.grid(row=0, column=idx, padx=4, sticky=tk.EW)
+            self.action_buttons.append(button)
+            button_frame.columnconfigure(idx, weight=1)
+
+        self.quit_button = ttk.Button(button_frame, text="저장 없이 종료", command=self.quit_game)
+        self.quit_button.grid(row=1, column=0, columnspan=5, pady=(8, 0), sticky=tk.EW)
+
+        self.log = tk.Text(
+            container,
+            height=10,
+            wrap=tk.WORD,
+            state=tk.DISABLED,
+            background="#f7f7f7",
+        )
+        self.log.pack(fill=tk.BOTH, expand=True)
+
+        self.append_log("게임을 시작합니다! 매년 행동을 선택하세요.")
+
+    def append_log(self, message: str) -> None:
+        self.log.configure(state=tk.NORMAL)
+        self.log.insert(tk.END, f"{message}\n")
+        self.log.see(tk.END)
+        self.log.configure(state=tk.DISABLED)
+
+    def update_stats(self) -> None:
+        self.stats_var.set(stats_line(self.stats))
+
+    def handle_action(self, action: Action) -> None:
+        if self.stats.age > 25:
+            return
+        result = action(self.stats)
+        event_result = yearly_event(self.stats)
+        self.stats.clamp()
+        self.append_log(result)
+        self.append_log(event_result)
+        self.stats.age += 1
+        self.update_stats()
+
+        if self.stats.health == 0 or self.stats.happiness == 0:
+            self.append_log("체력 또는 행복이 0이 되어 게임이 종료되었습니다.")
+            self.finish_game()
+        elif self.stats.age > 25:
+            self.finish_game()
+
+    def finish_game(self) -> None:
+        summary = end_summary(self.stats)
+        self.append_log(summary.strip())
+        for button in self.action_buttons:
+            button.configure(state=tk.DISABLED)
+        self.quit_button.configure(state=tk.DISABLED)
+        messagebox.showinfo("게임 종료", summary)
+
+    def quit_game(self) -> None:
+        if messagebox.askyesno("종료", "저장하지 않고 종료할까요?"):
+            self.append_log("게임을 저장하지 않고 종료합니다.")
+            self.finish_game()
 
 
 def run_game() -> None:
-    stats = Stats()
-    print("\n==== 간단한 인생 시뮬레이터 키우기 ====")
-    print("6살부터 25살까지, 매년 하나의 행동을 선택합니다.")
-
-    actions: dict[str, Action] = {
-        "1": study,
-        "2": play,
-        "3": part_time,
-        "4": exercise,
-        "5": rest,
-    }
-
-    while stats.age <= 25:
-        print("\n-------------------------------------")
-        print_stats(stats)
-        choice = choose_action()
-        if choice == "6":
-            print("게임을 저장하지 않고 종료합니다.")
-            break
-        if choice not in actions:
-            print("올바른 번호를 입력해주세요.")
-            continue
-
-        result = actions[choice](stats)
-        print(result)
-        print(yearly_event(stats))
-        stats.clamp()
-        stats.age += 1
-
-        if stats.health == 0 or stats.happiness == 0:
-            print("체력 또는 행복이 0이 되어 게임이 종료되었습니다.")
-            break
-
-    print(end_summary(stats))
+    root = tk.Tk()
+    ttk.Style(root).theme_use("clam")
+    LifeSimulatorApp(root)
+    root.mainloop()
 
 
 if __name__ == "__main__":
